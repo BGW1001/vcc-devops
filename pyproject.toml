@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "vcc-devops"
+version = "0.1.0"
+description = "VCC Platform: shared DevOps, CI/CD, and infrastructure tooling"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.vcc-layer]
+layer = "Layer DevOps - Shared CI/CD"
+repo = "vcc-devops"
+platform = "vcc-platform"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
