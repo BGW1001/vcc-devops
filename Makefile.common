@@ -1,0 +1,38 @@
+# Makefile.common — Shared VCC Platform build targets
+# Include this file in each repo's Makefile:
+#   include $(shell git rev-parse --show-toplevel)/../vcc-devops/Makefile.common
+# Or copy-paste targets as needed.
+
+PYTHON ?= python3
+PYTEST ?= pytest
+RUFF   ?= ruff
+
+.PHONY: test lint build up down clean help
+
+## test: Run all tests with pytest (verbose)
+test:
+	$(PYTEST) tests/ -v
+
+## lint: Lint code with ruff
+lint:
+	$(RUFF) check .
+
+## build: Build source and wheel distributions
+build:
+	$(PYTHON) setup.py sdist bdist_wheel
+
+## up: Start services via docker-compose
+up:
+	docker-compose up -d
+
+## down: Stop services via docker-compose
+down:
+	docker-compose down
+
+## clean: Remove build artifacts
+clean:
+	rm -rf dist/ build/ *.egg-info/ .pytest_cache/ .ruff_cache/
+
+## help: Show this help message
+help:
+	@grep -E '^## ' Makefile.common | sed 's/## /  /'
