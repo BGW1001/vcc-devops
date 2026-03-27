@@ -27,3 +27,14 @@ jobs:
           python-version: '3.11'
       - run: pip install -e . && pip install pytest pydantic
       - run: pytest tests/ -v --tb=short
+
+  layer-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: |
+          curl -s https://raw.githubusercontent.com/BGW1001/vcc-devops/main/scripts/check-layer-imports.py > /tmp/check-layer-imports.py
+          python /tmp/check-layer-imports.py .
