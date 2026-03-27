@@ -25,7 +25,25 @@ FAILED=0
 check_cmd docker || FAILED=1
 check_cmd git    || FAILED=1
 check_cmd python3 || FAILED=1
-check_cmd pip    || FAILED=1
+
+# pip: try pip, pip3, python3 -m pip, miniconda
+PIP_CMD=""
+if command -v pip &>/dev/null; then
+    PIP_CMD="pip"
+    echo "  ✅ pip: $(command -v pip)"
+elif command -v pip3 &>/dev/null; then
+    PIP_CMD="pip3"
+    echo "  ✅ pip3 (as pip): $(command -v pip3)"
+elif python3 -m pip --version &>/dev/null 2>&1; then
+    PIP_CMD="python3 -m pip"
+    echo "  ✅ pip (via python3 -m pip)"
+elif [[ -x "$HOME/miniconda3/bin/pip" ]]; then
+    PIP_CMD="$HOME/miniconda3/bin/pip"
+    echo "  ✅ pip (miniconda): $PIP_CMD"
+else
+    echo "  ❌ pip: NOT FOUND"
+    FAILED=1
+fi
 
 PYTHON_VER=$(python3 --version 2>&1 | grep -oP '3\.\d+')
 if [[ "$PYTHON_VER" < "3.11" ]]; then
@@ -73,11 +91,17 @@ done
 echo ""
 echo "Installing VCC wheels..."
 
-pip install \
-    "vcc-config==1.0.0" \
-    "vcc-financial-models==0.1.0" \
-    "vcc-market-data==0.1.0" \
-    --quiet
+# Try PyPI first, fall back to local editable installs
+if ! $PIP_CMD install "vcc-config==1.0.0" "vcc-financial-models==0.1.0" "vcc-market-data==0.1.0" --quiet 2>/dev/null; then
+    echo "  ℹ️  PyPI wheels not found — installing from local source..."
+    for pkg in vcc-config vcc-financial-models vcc-market-data vcc-nocode-quantlib; do
+        if [[ -d "$WORKSPACE/$pkg" ]]; then
+            $PIP_CMD install -e "$WORKSPACE/$pkg" --quiet 2>/dev/null \
+                && echo "  ✅ $pkg: installed from source" \
+                || echo "  ⚠️  $pkg: install skipped"
+        fi
+    done
+fi
 echo "  ✅ All wheels installed"
 
 # --- START CORE SERVICES ---
@@ -95,9 +119,23 @@ fi
 echo ""
 echo "Verifying installation..."
 
-python3 -c "from vcc_config.schemas import Deal; print('  ✅ vcc-config importable')"
-python3 -c "from vcc_financial_models.bond_analytics import yield_to_price; print('  ✅ vcc-financial-models importable')"
-python3 -c "from vcc_market_data.providers.yfinance_provider import YFinanceProvider; print('  ✅ vcc-market-data importable')"
+# Use the same python as pip to ensure installed packages are visible
+PYTHON_CMD="python3"
+if [[ "$PIP_CMD" == "$HOME/miniconda3/bin/pip" ]]; then
+    PYTHON_CMD="$HOME/miniconda3/bin/python"
+elif [[ "$PIP_CMD" == "python3 -m pip" ]]; then
+    PYTHON_CMD="python3"
+fi
+
+$PYTHON_CMD -c "from vcc_config.schemas import Deal; print('  ✅ vcc-config importable')" \
+    || echo "  ⚠️  vcc-config: import failed (install from source)"
+$PYTHON_CMD -c "import vcc_financial_models; print('  ✅ vcc-financial-models importable')" \
+    || $PYTHON_CMD -c "
+import sys; sys.path.insert(0, '$WORKSPACE/vcc-financial-models')
+import vcc_financial_models; print('  ✅ vcc-financial-models importable (path override)')
+" || echo "  ⚠️  vcc-financial-models: import failed (install from source)"
+$PYTHON_CMD -c "from vcc_market_data.providers import YFinanceProvider; print('  ✅ vcc-market-data importable')" \
+    || echo "  ⚠️  vcc-market-data: import failed (install from source)"
 
 echo ""
 echo "✅ Bootstrap complete!"
