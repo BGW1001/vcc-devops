@@ -1,67 +1,109 @@
 #!/usr/bin/env bash
-# bootstrap.sh — VCC Platform environment prerequisites check
-# Usage: ./bootstrap.sh
-# Exit 0 if all prerequisites are met, 1 if any are missing.
+# VCC Platform Bootstrap Script
+# Sets up full local development environment
+# Onboarding target: < 15 minutes on clean Ubuntu 22.04
+set -e
 
-set -euo pipefail
+echo "🐴 VCC Platform Bootstrap"
+echo "=========================="
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-ok()   { echo -e "${GREEN}  ✓${NC} $1"; }
-fail() { echo -e "${RED}  ✗${NC} $1"; MISSING=$((MISSING+1)); }
-info() { echo -e "${YELLOW}  →${NC} $1"; }
-
-MISSING=0
-
+# --- CHECK PREREQUISITES ---
 echo ""
-echo "======================================"
-echo " VCC Platform — Bootstrap Prerequisites"
-echo "======================================"
-echo ""
+echo "Checking prerequisites..."
 
-# ── Docker ─────────────────────────────────────────────────────────────────
-if command -v docker &>/dev/null; then
-  DOCKER_VERSION=$(docker --version 2>&1)
-  ok "Docker: $DOCKER_VERSION"
-else
-  fail "Docker not found. Install from https://docs.docker.com/get-docker/"
-fi
-
-# ── Git ─────────────────────────────────────────────────────────────────────
-if command -v git &>/dev/null; then
-  GIT_VERSION=$(git --version 2>&1)
-  ok "Git: $GIT_VERSION"
-else
-  fail "Git not found. Install from https://git-scm.com/"
-fi
-
-# ── Python 3.11+ ────────────────────────────────────────────────────────────
-PYTHON_CMD=""
-for cmd in python3.13 python3.12 python3.11 python3 python; do
-  if command -v "$cmd" &>/dev/null; then
-    PYVER=$($cmd --version 2>&1 | awk '{print $2}')
-    PYMAJOR=$(echo "$PYVER" | cut -d. -f1)
-    PYMINOR=$(echo "$PYVER" | cut -d. -f2)
-    if [[ "$PYMAJOR" -eq 3 && "$PYMINOR" -ge 11 ]]; then
-      PYTHON_CMD=$cmd
-      ok "Python: $PYVER (via $cmd)"
-      break
+check_cmd() {
+    if command -v "$1" &>/dev/null; then
+        echo "  ✅ $1: $(command -v $1)"
+        return 0
+    else
+        echo "  ❌ $1: NOT FOUND"
+        return 1
     fi
-  fi
-done
-if [[ -z "$PYTHON_CMD" ]]; then
-  fail "Python 3.11+ not found. Install from https://python.org"
+}
+
+FAILED=0
+check_cmd docker || FAILED=1
+check_cmd git    || FAILED=1
+check_cmd python3 || FAILED=1
+check_cmd pip    || FAILED=1
+
+PYTHON_VER=$(python3 --version 2>&1 | grep -oP '3\.\d+')
+if [[ "$PYTHON_VER" < "3.11" ]]; then
+    echo "  ❌ Python $PYTHON_VER found — need 3.11+"
+    FAILED=1
+else
+    echo "  ✅ Python $PYTHON_VER"
 fi
 
-# ── Summary ─────────────────────────────────────────────────────────────────
-echo ""
-if [[ "$MISSING" -eq 0 ]]; then
-  echo -e "${GREEN}All prerequisites satisfied. VCC Platform is ready to run.${NC}"
-  exit 0
-else
-  echo -e "${RED}$MISSING prerequisite(s) missing. Please install them and re-run bootstrap.sh.${NC}"
-  exit 1
+if [[ $FAILED -eq 1 ]]; then
+    echo ""
+    echo "❌ Missing prerequisites. Install them and re-run."
+    exit 1
 fi
+
+# --- CLONE REPOS ---
+echo ""
+echo "Cloning VCC repos..."
+
+WORKSPACE=${VCC_WORKSPACE:-$HOME/vcc-workspace}
+mkdir -p "$WORKSPACE"
+cd "$WORKSPACE"
+
+repos=(
+    "vcc-config"
+    "vcc-market-data"
+    "vcc-financial-models"
+    "vcc-nocode-quantlib"
+    "vcc-devops"
+    "vcc-platform"
+)
+
+for repo in "${repos[@]}"; do
+    if [[ -d "$repo" ]]; then
+        echo "  ✅ $repo: already cloned, pulling latest..."
+        git -C "$repo" pull --ff-only 2>/dev/null || echo "  ⚠️  $repo: pull skipped (local changes)"
+    else
+        echo "  📦 Cloning $repo..."
+        git clone "https://github.com/BGW1001/$repo.git" "$repo"
+        echo "  ✅ $repo: $(git -C $repo log --oneline -1)"
+    fi
+done
+
+# --- INSTALL WHEELS ---
+echo ""
+echo "Installing VCC wheels..."
+
+pip install \
+    "vcc-config==1.0.0" \
+    "vcc-financial-models==0.1.0" \
+    "vcc-market-data==0.1.0" \
+    --quiet
+echo "  ✅ All wheels installed"
+
+# --- START CORE SERVICES ---
+echo ""
+echo "Starting core services..."
+
+cd "$WORKSPACE/vcc-platform"
+if [[ -f "docker-compose.yml" ]]; then
+    docker-compose --profile core up -d 2>/dev/null && echo "  ✅ Core services started (Redis)" || echo "  ⚠️  docker-compose up failed (non-fatal)"
+else
+    echo "  ⚠️  docker-compose.yml not found, skipping services"
+fi
+
+# --- VERIFY ---
+echo ""
+echo "Verifying installation..."
+
+python3 -c "from vcc_config.schemas import Deal; print('  ✅ vcc-config importable')"
+python3 -c "from vcc_financial_models.bond_analytics import yield_to_price; print('  ✅ vcc-financial-models importable')"
+python3 -c "from vcc_market_data.providers.yfinance_provider import YFinanceProvider; print('  ✅ vcc-market-data importable')"
+
+echo ""
+echo "✅ Bootstrap complete!"
+echo ""
+echo "Next steps:"
+echo "  cd $WORKSPACE/vcc-platform"
+echo "  docker-compose --profile quants up -d   # Start QuantLib server + Redis + Postgres"
+echo "  curl http://localhost:8098/health        # Verify QuantLib server"
+echo ""
