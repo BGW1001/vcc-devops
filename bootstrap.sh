@@ -47,8 +47,19 @@ fi
 
 PYTHON_VER=$(python3 --version 2>&1 | grep -oP '3\.\d+')
 if [[ "$PYTHON_VER" < "3.11" ]]; then
-    echo "  ❌ Python $PYTHON_VER found — need 3.11+"
-    FAILED=1
+    echo "  ⚠️  Python $PYTHON_VER found — need 3.11+. Attempting install..."
+    # Try deadsnakes PPA for Ubuntu
+    if command -v apt-get &>/dev/null; then
+        apt-get install -y software-properties-common 2>/dev/null || true
+        add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null || true
+        apt-get update -qq 2>/dev/null || true
+        apt-get install -y python3.11 python3.11-pip python3.11-venv 2>/dev/null \
+            && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 2>/dev/null \
+            && echo "  ✅ Python 3.11 installed via deadsnakes" \
+            || { echo "  ❌ Could not install Python 3.11"; FAILED=1; }
+    else
+        echo "  ❌ Python $PYTHON_VER found — need 3.11+"; FAILED=1
+    fi
 else
     echo "  ✅ Python $PYTHON_VER"
 fi
